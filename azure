@@ -1,0 +1,78 @@
+
+name: Android CI
+
+on:
+  pull_request:
+    branches-ignore:
+      - 'l10n_v3_openjdk'
+    types: [opened, reopened]
+  push:
+    branches-ignore:
+      - 'l10n_v3_openjdk'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    env:
+      GPLAY_KEYSTORE_PASSWORD: ${{ secrets.GPLAY_KEYSTORE_PASSWORD }}
+      CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Get JRE 8
+        uses: dawidd6/action-download-artifact@v9
+        with:
+          workflow: build.yml
+          path: app_pojavlauncher/src/main/assets/components/jre
+          workflow_conclusion: completed
+          repo: AngelAuraMC/angelauramc-openjdk-build
+          branch: buildjre8
+          name: jre8-pojav
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          validate-wrappers: false
+          gradle-version: '9.6.1'
+
+      - name: Run scripts
+        run: |
+          ./scripts/languagelist_updater.sh
+          mkdir -p out
+
+      # Build and upload the test APK before attempting release signing.
+      - name: Build Debug APK
+        run: |
+          gradle :app_pojavlauncher:assembleDebug
+          cp app_pojavlauncher/build/outputs/apk/debug/app_pojavlauncher-debug.apk out/app-debug.apk
+          md5sum out/app-debug.apk > out/app-debug.md5
+
+      - name: Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: CART3R-debug-apk
+          path: out/app-debug.*
+
+      # Release signing is separate; a failure here won't erase the debug artifact.
+      - name: Build Release APK
+        run: |
+          gradle :app_pojavlauncher:assembleRelease
+          cp app_pojavlauncher/build/outputs/apk/release/app_pojavlauncher-release.apk out/app-release.apk
+          md5sum out/app-release.apk > out/app-release.md5
+
+      - name: Upload Release APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: CART3R-release-apk
+          path: out/app-release.*
